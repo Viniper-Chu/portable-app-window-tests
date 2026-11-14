@@ -1,0 +1,17 @@
+name: Installed Windows update acceptance
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  upgrade:
+    runs-on: windows-2022
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install WebView test client
+        run: npm install --no-save --ignore-scripts --no-audit --fund=false playwright-core@1.56.1
+      - name: Exercise installed update and session recovery
+        env:
+          CASE_DATA: ${{ secrets.UPGRADE_CASE }}
+          WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: --remote-debugging-port=9245
+        run: node upgrade.mjs
