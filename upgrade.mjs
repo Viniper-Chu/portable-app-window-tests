@@ -117,8 +117,17 @@ try{
  check(readFileSync(exe).subarray(0,2).toString()==='MZ','Original native file is not executable');
  ps("$p=Join-Path (Join-Path $env:CASE_DIR portable) $env:CASE_EXE; Start-Process -FilePath $p -WorkingDirectory (Split-Path $p)");
  stage='initial native launch';const oldPid=await wait(nativePid,'Old native window missing'); await connectView(); stage='room entry using old UI';
+ if(cfg.fixture){
+   await steps(cfg.first);
+   await ui.evaluate(({key,value})=>localStorage.setItem(key,JSON.stringify(value)),cfg.fixture);
+   await ui.reload();await connectView();
+ }
  await steps(cfg.join); console.log('Verified old installed version and joined the live session.');
  stage='prepare nonempty inventory';const before=await prepare();
+ if(cfg.baseline){
+   const privateIds=before.held[0].map(item=>item[cfg.id]);
+   check(isDeepStrictEqual(privateIds,cfg.baseline.inventory) && before.context[3]===cfg.baseline.participant && before.context[1]===cfg.baseline.match,'Old app did not receive the prepared nonempty inventory');
+ }
  console.log('Baseline: '+before.roster.length+' participants; seat '+(before.position+1)+'; '+before.held[0].length+' private inventory entries.');
  stage='check update';await steps(cfg.check);
  stage='install via visible control';await ui.locator(cfg.install).click({timeout:10000,noWaitAfter:true}).catch(()=>{});
