@@ -61,6 +61,8 @@ async function connectView(){
 }
 async function steps(list){
  for(const s of list){
+   if(s.seen){await wait(async()=>(await labels()).some(l=>l.text===s.seen),"Expected canvas text missing");continue}
+   if(s.untilLabel){await wait(async()=>{const all=await labels(); if(all.some(l=>l.text===s.untilLabel))return true;for(const button of s.close??[]){if(await clickLabel(button))break;}return false},"Restored controls unavailable"); continue}
    if(s.label){await wait(()=>clickLabel(s.label),'Canvas control unavailable');continue}
    const elem=ui.locator(s.selector);
    if(s.value!==undefined)await elem.fill(s.value);
@@ -124,7 +126,7 @@ try{
  console.log('Live room, round, seat ID and index, participant order, identity, and full inventory instances match. Application UI displays the connected original session.');
 } catch(e) {
  // Playwright errors may contain rendered personal data, URLs or local paths.
- console.error('Failed stage: '+stage+'. '+(e.constructor===Error && !e.message.includes('\n') ? e.message.replace(/https?:\/\/\S+/g,'[URL]').slice(0,140):'Control did not reach expected state.'));
+ console.error('Failed stage: '+stage+'. '+(e.name==='Error' && /^[a-zA-Z0-9 ,.-]{1,110}$/.test(e.message) ? e.message : 'Control did not reach expected state.'));
  process.exitCode=1;
 } finally{
  try{ps('$p=Join-Path (Join-Path $env:CASE_DIR portable) $env:CASE_EXE; Get-Process | Where-Object {$_.Path -eq $p} | Stop-Process -Force')}catch{}
