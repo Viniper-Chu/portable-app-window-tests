@@ -10,7 +10,7 @@ const cfg=JSON.parse(process.env.CASE_DATA);
 delete process.env.CASE_DATA;
 const work=mkdtempSync(path.join(process.env.RUNNER_TEMP,'installed-update-'));
 const env={...process.env,CASE_DIR:work,CASE_EXE:cfg.exe,CASE_ZIP:cfg.zip};
-const ps=(script)=>execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',"$ErrorActionPreference='Stop'; "+script],{env,encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();
+const ps=(script)=>execFileSync('pwsh.exe',['-NoProfile','-NonInteractive','-Command',"$ErrorActionPreference='Stop'; "+script],{env,encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const get=(obj,key)=>key.split('.').reduce((o,k)=>o?.[k],obj);
 const check=(condition,message)=>{if(!condition)throw Error(message)};
@@ -111,8 +111,11 @@ try{
  }
  check(downloaded,'Old archive download failed'); stage='old ZIP digest';
  check(checksum(path.join(work,'app.zip'))===cfg.sha,'Old archive digest mismatch');
- stage='extract and launch original EXE';
- ps("Expand-Archive (Join-Path $env:CASE_DIR app.zip) (Join-Path $env:CASE_DIR portable); $p=Join-Path (Join-Path $env:CASE_DIR portable) $env:CASE_EXE; Start-Process -FilePath $p -WorkingDirectory (Split-Path $p)");
+ stage='extract original ZIP';
+ ps("[IO.Compression.ZipFile]::ExtractToDirectory((Join-Path $env:CASE_DIR app.zip),(Join-Path $env:CASE_DIR portable))");
+ stage='launch original EXE';
+ check(readFileSync(exe).subarray(0,2).toString()==='MZ','Original native file is not executable');
+ ps("$p=Join-Path (Join-Path $env:CASE_DIR portable) $env:CASE_EXE; Start-Process -FilePath $p -WorkingDirectory (Split-Path $p)");
  stage='initial native launch';const oldPid=await wait(nativePid,'Old native window missing'); await connectView(); stage='room entry using old UI';
  await steps(cfg.join); console.log('Verified old installed version and joined the live session.');
  stage='prepare nonempty inventory';const before=await prepare();
@@ -133,6 +136,13 @@ try{
  await steps(cfg.verifyUI);
  console.log('Live room, round, seat ID and index, participant order, identity, and full inventory instances match. Application UI displays the connected original session.');
 } catch(e) {
+ if(e.stderr){
+   const msg=String(e.stderr).replace(/\x1b\[[0-9;]*m/g,'');
+   const reasons=['access is denied','permission denied','cannot find','could not find','not recognized','in use','unexpected token','cannot overwrite','cannot bind argument','not supported','invalid','does not exist','path is denied','not a valid','not found'];
+   console.error('Native command status '+e.status+'; '+(reasons.filter(k=>msg.toLowerCase().includes(k)).join(', ') || 'system error')+'.');
+   const details=msg.split(/\r?\n/).filter(x=>!x.includes('http') && !x.includes('CASE_') && !x.includes('UPGRADE_') && !x.includes('***')).slice(-4).join(' ').replace(/[A-Za-z]:\\[^\s]*/g,'[path]').slice(0,240);
+   if(details)console.error(details);
+ }
  // Playwright errors may contain rendered personal data, URLs or local paths.
  console.error('Failed stage: '+stage+'. '+(e.name==='Error' && /^[a-zA-Z0-9 ,.-]{1,110}$/.test(e.message) ? e.message : 'Control did not reach expected state.'));
  process.exitCode=1;
