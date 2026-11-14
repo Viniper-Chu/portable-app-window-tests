@@ -1,0 +1,38 @@
+name: Manual portable application acceptance
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  desktop:
+    runs-on: windows-2022
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and launch portable application
+        shell: pwsh
+        env:
+          APP_ZIP: ${{ secrets.APP_ZIP }}
+          APP_SHA256: ${{ secrets.APP_SHA256 }}
+          APP_CONFIG: ${{ secrets.APP_CONFIG }}
+          WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: --remote-debugging-port=9245
+        run: |
+          $ErrorActionPreference='Stop'
+          $cfg=$env:APP_CONFIG | ConvertFrom-Json
+          $zip=Join-Path $env:RUNNER_TEMP app.zip
+          $dir=Join-Path $env:RUNNER_TEMP portable
+          Invoke-WebRequest -Uri $env:APP_ZIP -OutFile $zip
+          if ((Get-FileHash $zip).Hash -ne $env:APP_SHA256) {throw 'ZIP checksum mismatch'}
+          Expand-Archive $zip $dir
+          $exe=Join-Path $dir $cfg.exe
+          Add-Type -AssemblyName System.Drawing
+          $icon=[Drawing.Icon]::ExtractAssociatedIcon($exe)
+          if (!$icon -or $icon.Width -lt 16) {throw 'No Explorer icon'}
+          Write-Host "ZIP verified. Explorer icon $($icon.Width)x$($icon.Height)."
+          $p=Start-Process $exe -WorkingDirectory (Split-Path $exe) -PassThru
+          try {
+            node test.mjs
+            if($LASTEXITCODE -ne 0){throw 'Native webview test failed'}
+            $p.Refresh()
+            if($p.HasExited -or !$p.MainWindowHandle){throw 'No native main window'}
+            Write-Host 'Native Windows process and window verified.'
+          } finally {if(!$p.HasExited){Stop-Process -Id $p.Id -Force}}
