@@ -49,9 +49,10 @@ async function connectView(){
  await ui.locator('canvas').waitFor();
  await ui.evaluate(()=>{
    if(window.acceptanceLabels)return;
-   const p=CanvasRenderingContext2D.prototype, draw=p.fillText,clear=p.clearRect;
+   const p=CanvasRenderingContext2D.prototype, draw=p.fillText,clear=p.clearRect,fill=p.fillRect;
    const entries=new Map();window.acceptanceLabels=entries;
    p.clearRect=function(...v){if(v[2]>250&&v[3]>250)entries.clear();return clear.apply(this,v)};
+   p.fillRect=function(x,y,w,h){if(x===0&&y===0&&w>=this.canvas.clientWidth-1&&h>=this.canvas.clientHeight-1)entries.clear();return fill.call(this,x,y,w,h)};
    p.fillText=function(t,x,y,...rest){
     const b=this.canvas.getBoundingClientRect(),m=this.getTransform();
     const at={text:String(t),font:this.font,x:b.x+(m.a*x+m.c*y+m.e)*b.width/this.canvas.width,y:b.y+(m.b*x+m.d*y+m.f)*b.height/this.canvas.height};
@@ -60,7 +61,8 @@ async function connectView(){
  });
 }
 async function steps(list){
- for(const s of list){
+ for(const [i,s] of list.entries()){
+   console.log('Group control '+(i+1));
    if(s.seen){await wait(async()=>(await labels()).some(l=>l.text===s.seen),"Expected canvas text missing");continue}
    if(s.untilLabel){await wait(async()=>{const all=await labels(); if(all.some(l=>l.text===s.untilLabel))return true;for(const button of s.close??[]){if(await clickLabel(button))break;}return false},"Restored controls unavailable"); continue}
    if(s.label){await wait(()=>clickLabel(s.label),'Canvas control unavailable');continue}
@@ -102,17 +104,23 @@ async function prepare(){
  throw Error('Initial nonempty session fixture did not become ready');
 }
 try{
- ps("Invoke-WebRequest -UseBasicParsing $env:CASE_ZIP -OutFile (Join-Path $env:CASE_DIR app.zip)");
+ let downloaded=false;
+ for(let tries=0;tries<3&&!downloaded;tries++){
+   try{execFileSync('curl.exe',['-fLsS','--retry','2','--max-time','80',cfg.zip,'-o',path.join(work,'app.zip')],{stdio:'pipe'});downloaded=true;}
+   catch{await sleep(1600);}
+ }
+ check(downloaded,'Old archive download failed'); stage='old ZIP digest';
  check(checksum(path.join(work,'app.zip'))===cfg.sha,'Old archive digest mismatch');
+ stage='extract and launch original EXE';
  ps("Expand-Archive (Join-Path $env:CASE_DIR app.zip) (Join-Path $env:CASE_DIR portable); $p=Join-Path (Join-Path $env:CASE_DIR portable) $env:CASE_EXE; Start-Process -FilePath $p -WorkingDirectory (Split-Path $p)");
- stage='initial native launch';const oldPid=await wait(nativePid,'Old native window missing'); await connectView();
+ stage='initial native launch';const oldPid=await wait(nativePid,'Old native window missing'); await connectView(); stage='room entry using old UI';
  await steps(cfg.join); console.log('Verified old installed version and joined the live session.');
  stage='prepare nonempty inventory';const before=await prepare();
  console.log('Baseline: '+before.roster.length+' participants; seat '+(before.position+1)+'; '+before.held[0].length+' private inventory entries.');
  stage='check update';await steps(cfg.check);
  stage='install via visible control';await ui.locator(cfg.install).click({timeout:10000,noWaitAfter:true}).catch(()=>{});
  const newPid=await wait(()=>{const p=nativePid();return p && p!==oldPid && p},'No replacement native window',135000);
- check(ps('Get-Process -Id '+oldPid+' -ErrorAction SilentlyContinue | ForEach-Object Id; exit 0')==='','Old native process still running');
+ check(ps('(Get-Process | Where-Object Id -eq '+oldPid+').Id')==='','Old native process still running');
  for(const [name,digest] of Object.entries(cfg.expected))check(checksum(path.join(appdir,name))===digest,'Installed member digest mismatch');
  console.log('Original native process exited. Replacement process opened at the same path. All installed files match the target ZIP.');
  stage='first launch changelog';await connectView();await steps(cfg.after);
